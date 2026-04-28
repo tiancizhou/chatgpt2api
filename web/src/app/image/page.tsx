@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { History, LoaderCircle, Plus, Trash2 } from "lucide-react";
+import { History, LoaderCircle, Ticket } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
@@ -17,7 +17,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { editImage, fetchAccounts, generateImage, type Account } from "@/lib/api";
+import {
+  editImage,
+  editUserImage,
+  fetchAccounts,
+  fetchUserBalance,
+  generateImage,
+  generateUserImage,
+  redeemCdk,
+  type Account,
+} from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import {
   clearImageConversations,
@@ -26,6 +35,7 @@ import {
   listImageConversations,
   saveImageConversation,
   saveImageConversations,
+  setImageConversationOwner,
   type ImageConversation,
   type ImageConversationMode,
   type ImageTurn,
@@ -36,7 +46,11 @@ import {
 
 const ACTIVE_CONVERSATION_STORAGE_KEY = "chatgpt2api:image_active_conversation_id";
 const IMAGE_SIZE_STORAGE_KEY = "chatgpt2api:image_last_size";
+const FAST_IMAGE_JOB_POLL_INTERVAL_MS = 2000;
+const SLOW_IMAGE_JOB_POLL_INTERVAL_MS = 5000;
+const IMAGE_JOB_FAST_POLL_WINDOW_MS = 30000;
 const activeConversationQueueIds = new Set<string>();
+const cancelledTurnIds = new Set<string>();
 
 function buildConversationTitle(prompt: string) {
   const trimmed = prompt.trim();
@@ -114,6 +128,89 @@ function sortImageConversations(conversations: ImageConversation[]) {
   return [...conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+function ImageMobileHeader({
+  historyCount,
+  activeTaskCount,
+  availableQuota,
+  isCustomer,
+  onOpenHistory,
+  onRedeem,
+}: {
+  historyCount: number;
+  activeTaskCount: number;
+  availableQuota: string;
+  isCustomer: boolean;
+  onOpenHistory: () => void;
+  onRedeem: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 lg:hidden">
+      <button
+        type="button"
+        onClick={onOpenHistory}
+        className="nature-interactive relative inline-flex h-9 shrink-0 items-center gap-1 rounded-full border border-[#cad9b2]/80 bg-[#fffdf4]/90 px-3 text-xs font-semibold text-[#315f35] shadow-sm"
+      >
+        <History className="size-3.5" />
+        我的图片
+        {historyCount > 0 ? (
+          <span className="ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-[#2f6233] px-1.5 text-[10px] font-bold text-[#fbf8ed]">
+            {historyCount}
+          </span>
+        ) : null}
+        {activeTaskCount > 0 ? <span className="ml-0.5 size-2.5 rounded-full bg-amber-400" /> : null}
+      </button>
+      <div className="flex min-w-0 shrink-0 items-center gap-2">
+        {isCustomer ? (
+          <button
+            type="button"
+            className="nature-interactive inline-flex h-9 max-w-[58vw] shrink-0 items-center justify-center gap-1 rounded-full border border-[#cad9b2]/70 bg-[#fffdf4]/82 px-3 text-xs font-semibold text-[#315f35] shadow-sm"
+            onClick={onRedeem}
+          >
+            <span className="truncate">
+              额度 <span className="font-bold text-[#203d2b]">{availableQuota}</span>
+            </span>
+            <span className="text-[#cad9b2]">|</span>
+            <Ticket className="size-3.5 shrink-0" />
+            <span className="shrink-0">兑换</span>
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ImageCreditSummary({
+  availableQuota,
+  isCustomer,
+  onRedeem,
+}: {
+  availableQuota: string;
+  isCustomer: boolean;
+  onRedeem: () => void;
+}) {
+  if (!isCustomer) {
+    return null;
+  }
+
+  return (
+    <div className="hidden items-center justify-between gap-2 rounded-full border border-[#cad9b2]/70 bg-[#fffdf4]/82 px-3 py-1.5 text-xs shadow-sm sm:paper-surface sm:flex sm:rounded-[30px] sm:px-5 sm:py-4">
+      <div className="min-w-0 text-[#6a7458]">
+        额度 <span className="font-bold text-[#203d2b]">{availableQuota}</span>
+        <span className="mx-1 text-[#cad9b2]">|</span>
+        每张 2 额度
+      </div>
+      <button
+        type="button"
+        className="nature-interactive inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-[#edf6dc] px-3 font-semibold text-[#315f35] sm:h-10 sm:bg-linear-to-br sm:from-[#2f6233] sm:to-[#6f9f48] sm:text-[#fbf8ed]"
+        onClick={onRedeem}
+      >
+        <Ticket className="size-3.5" />
+        兑换
+      </button>
+    </div>
+  );
+}
+
 async function recoverConversationHistory(items: ImageConversation[]) {
   const normalized = items.map((conversation) => {
     let changed = false;
@@ -125,15 +222,11 @@ async function recoverConversationHistory(items: ImageConversation[]) {
 
       const loadingCount = turn.images.filter((image) => image.status === "loading").length;
       if (loadingCount > 0) {
-        const message = "页面刷新或任务中断，未完成的图片已标记为失败";
-        changed = true;
+        changed = changed || turn.status !== "queued" || Boolean(turn.error);
         return {
           ...turn,
-          status: "error" as const,
-          error: message,
-          images: turn.images.map((image) =>
-            image.status === "loading" ? { ...image, status: "error" as const, error: message } : image,
-          ),
+          status: "queued" as const,
+          error: undefined,
         };
       }
 
@@ -174,7 +267,7 @@ async function recoverConversationHistory(items: ImageConversation[]) {
   return normalized;
 }
 
-function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
+function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; isCustomer: boolean; ownerId: string }) {
   const didLoadQuotaRef = useRef(false);
   const conversationsRef = useRef<ImageConversation[]>([]);
   const resultsViewportRef = useRef<HTMLDivElement>(null);
@@ -196,8 +289,14 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "one"; id: string } | { type: "all" } | null>(null);
+  const [isRedeemOpen, setIsRedeemOpen] = useState(false);
+  const [redeemCode, setRedeemCode] = useState("");
+  const [isRedeeming, setIsRedeeming] = useState(false);
 
   const parsedCount = useMemo(() => Math.max(1, Math.min(10, Number(imageCount) || 1)), [imageCount]);
+  const numericAvailableQuota = useMemo(() => Number(availableQuota), [availableQuota]);
+  const estimatedCost = isCustomer ? parsedCount * 2 : 0;
+  const hasKnownInsufficientBalance = isCustomer && Number.isFinite(numericAvailableQuota) && numericAvailableQuota < estimatedCost;
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
@@ -223,6 +322,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
   }, [conversations]);
 
   useEffect(() => {
+    setImageConversationOwner(ownerId);
     let cancelled = false;
 
     const loadHistory = async () => {
@@ -230,8 +330,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         const storedSize = typeof window !== "undefined" ? window.localStorage.getItem(IMAGE_SIZE_STORAGE_KEY) : null;
         setImageSize(storedSize || "");
 
-        const items = await listImageConversations();
-        const normalizedItems = await recoverConversationHistory(items);
+        const normalizedItems = await recoverConversationHistory(await listImageConversations());
         if (cancelled) {
           return;
         }
@@ -259,9 +358,18 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ownerId]);
 
   const loadQuota = useCallback(async () => {
+    if (isCustomer) {
+      try {
+        const data = await fetchUserBalance();
+        setAvailableQuota(String(data.credit_balance));
+      } catch {
+        setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));
+      }
+      return;
+    }
     if (!isAdmin) {
       setAvailableQuota("--");
       return;
@@ -272,7 +380,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     } catch {
       setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));
     }
-  }, [isAdmin]);
+  }, [isAdmin, isCustomer]);
 
   useEffect(() => {
     if (didLoadQuotaRef.current) {
@@ -360,7 +468,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         await saveImageConversation(nextConversation);
       }
     },
-    [],
+    [isCustomer],
   );
 
   const clearComposerInputs = useCallback(() => {
@@ -382,6 +490,10 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     setSelectedConversationId(null);
     resetComposer();
     textareaRef.current?.focus();
+  };
+
+  const handleSelectConversation = (id: string) => {
+    setSelectedConversationId(id);
   };
 
   const handleDeleteConversation = async (id: string) => {
@@ -457,7 +569,6 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
 
       setReferenceImageFiles((prev) => [...prev, ...files]);
       setReferenceImages((prev) => [...prev, ...previews]);
-      setImageMode("edit");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -465,7 +576,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
       const message = error instanceof Error ? error.message : "读取参考图失败";
       toast.error(message);
     }
-  }, []);
+  }, [isCustomer]);
 
   const handleReferenceImageChange = useCallback(
     async (files: File[]) => {
@@ -489,12 +600,56 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     setReferenceImages((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
   }, []);
 
+  const handleCancelTurn = useCallback(
+    async (conversationId: string, turnId: string) => {
+      cancelledTurnIds.add(turnId);
+      await updateConversation(conversationId, (current) => {
+        if (!current) return null as unknown as ImageConversation;
+        return {
+          ...current,
+          updatedAt: new Date().toISOString(),
+          turns: current.turns.map((turn) =>
+            turn.id === turnId
+              ? {
+                  ...turn,
+                  status: "error" as const,
+                  error: "已手动取消",
+                  images: turn.images.map((image) =>
+                    image.status === "loading"
+                      ? { ...image, status: "error" as const, error: "已取消" }
+                      : image,
+                  ),
+                }
+              : turn,
+          ),
+        };
+      });
+    },
+    [updateConversation],
+  );
+
   const handleContinueEdit = useCallback(
-    (conversationId: string, image: StoredImage | StoredReferenceImage) => {
-      const nextReferenceImage =
-        "dataUrl" in image
-          ? image
-          : buildReferenceImageFromResult(image, `conversation-${conversationId}-${Date.now()}.png`);
+    async (conversationId: string, image: StoredImage | StoredReferenceImage) => {
+      let nextReferenceImage: StoredReferenceImage | null;
+      if ("dataUrl" in image) {
+        nextReferenceImage = image;
+      } else if (image.url) {
+        try {
+          const response = await fetch(image.url);
+          const blob = await response.blob();
+          const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.readAsDataURL(blob);
+          });
+          nextReferenceImage = { name: `conversation-${conversationId}-${Date.now()}.png`, type: blob.type || "image/png", dataUrl };
+        } catch {
+          toast.error("读取图片失败，无法继续编辑");
+          return;
+        }
+      } else {
+        nextReferenceImage = buildReferenceImageFromResult(image, `conversation-${conversationId}-${Date.now()}.png`);
+      }
       if (!nextReferenceImage) {
         return;
       }
@@ -554,6 +709,12 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         };
       });
 
+      if (cancelledTurnIds.has(queuedTurn.id)) {
+        cancelledTurnIds.delete(queuedTurn.id);
+        activeConversationQueueIds.delete(conversationId);
+        return;
+      }
+
       try {
         const referenceFiles = queuedTurn.referenceImages.map((image, index) =>
           dataUrlToFile(image.dataUrl, image.name || `${queuedTurn.id}-${index + 1}.png`, image.type),
@@ -587,19 +748,30 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         }
 
         const tasks = pendingImages.map(async (pendingImage) => {
+          let currentJobId = pendingImage.jobId;
+          if (cancelledTurnIds.has(queuedTurn.id)) {
+            return Promise.reject(new Error("已取消"));
+          }
           try {
-            const data =
-              queuedTurn.mode === "edit"
+            let finalJobId = currentJobId;
+            const data = isCustomer
+              ? queuedTurn.mode === "edit"
+                ? await editUserImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
+                : await generateUserImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
+              : queuedTurn.mode === "edit"
                 ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
                 : await generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size);
             const first = data.data?.[0];
-            if (!first?.b64_json) {
+
+            if (!first?.url && !first?.b64_json) {
               throw new Error("未返回图片数据");
             }
 
             const nextImage: StoredImage = {
               id: pendingImage.id,
+              jobId: finalJobId,
               status: "success",
+              url: first.url,
               b64_json: first.b64_json,
             };
 
@@ -628,6 +800,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
             const message = error instanceof Error ? error.message : "生成失败";
             const failedImage: StoredImage = {
               id: pendingImage.id,
+              jobId: currentJobId,
               status: "error",
               error: message,
             };
@@ -718,7 +891,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         }
       }
     },
-    [loadQuota, updateConversation],
+    [isCustomer, loadQuota, updateConversation],
   );
   /* eslint-enable react-hooks/preserve-manual-memoization */
 
@@ -733,6 +906,32 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     }
   }, [conversations, runConversationQueue]);
 
+  const handleRedeemCdk = async () => {
+    const code = redeemCode.trim();
+    if (!code) {
+      toast.error("请输入 CDK");
+      return;
+    }
+    setIsRedeeming(true);
+    try {
+      const data = await redeemCdk(code);
+      setAvailableQuota(String(data.balance));
+      setRedeemCode("");
+      setIsRedeemOpen(false);
+      toast.success(`兑换成功，到账 ${data.credited} 额度`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "兑换失败";
+      toast.error(message);
+    } finally {
+      setIsRedeeming(false);
+    }
+  };
+
+  const handleUseExamplePrompt = (value: string) => {
+    setImagePrompt(value);
+    textareaRef.current?.focus();
+  };
+
   const handleSubmit = async () => {
     const prompt = imagePrompt.trim();
     if (!prompt) {
@@ -740,10 +939,12 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
       return;
     }
 
-    if (imageMode === "edit" && referenceImageFiles.length === 0) {
-      toast.error("请先上传参考图");
+    if (isCustomer && hasKnownInsufficientBalance) {
+      toast.error("额度不足，请先兑换 CDK");
       return;
     }
+
+    const submitMode: ImageConversationMode = referenceImageFiles.length > 0 ? "edit" : "generate";
 
     const targetConversation = selectedConversationId
       ? conversationsRef.current.find((conversation) => conversation.id === selectedConversationId) ?? null
@@ -755,8 +956,8 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
       id: turnId,
       prompt,
       model: "gpt-image-2",
-      mode: imageMode,
-      referenceImages: imageMode === "edit" ? referenceImages : [],
+      mode: submitMode,
+      referenceImages: submitMode === "edit" ? referenceImages : [],
       count: parsedCount,
       size: imageSize,
       images: Array.from({ length: parsedCount }, (_, index) => ({
@@ -799,7 +1000,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
 
   return (
     <>
-      <section className="mx-auto grid h-[calc(100vh-5rem)] min-h-0 w-full max-w-[1380px] grid-cols-1 gap-3 px-3 pb-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <section className="mx-auto grid h-full min-h-0 w-full max-w-[1380px] touch-none grid-cols-1 gap-2 overflow-hidden overscroll-none px-2 pb-3 sm:gap-3 sm:px-3 sm:pb-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <div className="hidden h-full min-h-0 border-r border-stone-200/70 pr-3 lg:block">
           <ImageSidebar
             conversations={conversations}
@@ -807,7 +1008,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
             selectedConversationId={selectedConversationId}
             onCreateDraft={handleCreateDraft}
             onClearHistory={openClearHistoryConfirm}
-            onSelectConversation={setSelectedConversationId}
+            onSelectConversation={(id) => void handleSelectConversation(id)}
             onDeleteConversation={openDeleteConversationConfirm}
             formatConversationTime={formatConversationTime}
           />
@@ -816,10 +1017,13 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
           <DialogContent className="flex h-[80vh] w-[92vw] max-w-[420px] flex-col overflow-hidden rounded-[32px] border-stone-200 bg-white p-0 shadow-2xl">
             <DialogHeader className="px-6 pt-6 pb-2">
-              <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <DialogTitle className="flex items-center gap-2 text-lg font-bold text-[#203d2b]">
                 <History className="size-5" />
-                历史记录
+                我的图片
               </DialogTitle>
+              <DialogDescription className="text-sm text-[#6a7458]">
+                生成过的图片会保存在这里，方便继续修改。
+              </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-8">
               <ImageSidebar
@@ -832,7 +1036,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
                 }}
                 onClearHistory={openClearHistoryConfirm}
                 onSelectConversation={(id) => {
-                  setSelectedConversationId(id);
+                  void handleSelectConversation(id);
                   setIsHistoryOpen(false);
                 }}
                 onDeleteConversation={openDeleteConversationConfirm}
@@ -843,42 +1047,38 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
           </DialogContent>
         </Dialog>
 
-        <div className="flex min-h-0 flex-col gap-3 sm:gap-4">
-          <div className="flex items-center justify-between gap-3 lg:hidden">
-            <Button
-              variant="outline"
-              className="h-10 flex-1 rounded-2xl border-stone-200 bg-white/85 text-stone-700 shadow-sm"
-              onClick={() => setIsHistoryOpen(true)}
-            >
-              <History className="mr-2 size-4" />
-              历史记录 ({conversations.length})
-            </Button>
-            <Button
-              className="h-10 rounded-2xl bg-stone-950 text-white shadow-sm"
-              onClick={handleCreateDraft}
-            >
-              <Plus className="size-4" />
-              新建
-            </Button>
-            <Button
-              variant="outline"
-              className="h-10 rounded-2xl border-stone-200 bg-white/85 px-3 text-stone-600 shadow-sm"
-              onClick={openClearHistoryConfirm}
-              disabled={conversations.length === 0}
-            >
-              <Trash2 className="size-4" />
-            </Button>
+        <div className="flex h-full min-h-0 touch-none flex-col overflow-hidden sm:gap-4">
+          <div className="shrink-0 pb-2">
+            <ImageMobileHeader
+              historyCount={conversations.length}
+              activeTaskCount={activeTaskCount}
+              availableQuota={availableQuota}
+              isCustomer={isCustomer}
+              onOpenHistory={() => setIsHistoryOpen(true)}
+              onRedeem={() => setIsRedeemOpen(true)}
+            />
           </div>
+
+          <ImageCreditSummary
+            availableQuota={availableQuota}
+            isCustomer={isCustomer}
+            onRedeem={() => setIsRedeemOpen(true)}
+          />
 
           <div
             ref={resultsViewportRef}
-            className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-2 py-3 sm:px-4 sm:py-4"
+            className="hide-scrollbar min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-contain px-0 py-1 sm:px-4 sm:py-4"
+            onTouchMove={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
           >
             <ImageResults
               selectedConversation={selectedConversation}
               onOpenLightbox={openLightbox}
               onContinueEdit={handleContinueEdit}
+              onCancelTurn={handleCancelTurn}
               formatConversationTime={formatConversationTime}
+              onUseExamplePrompt={handleUseExamplePrompt}
+              canEdit
             />
           </div>
 
@@ -888,6 +1088,11 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
             imageCount={imageCount}
             imageSize={imageSize}
             availableQuota={availableQuota}
+            quotaLabel={isCustomer ? "可用额度" : "剩余额度"}
+            costHint={isCustomer ? `预计消耗 ${estimatedCost} 额度` : ""}
+            canEdit
+            canSubmit={!hasKnownInsufficientBalance}
+            submitDisabledReason={hasKnownInsufficientBalance ? "额度不足，请先兑换 CDK" : ""}
             activeTaskCount={activeTaskCount}
             referenceImages={referenceImages}
             textareaRef={textareaRef}
@@ -911,6 +1116,50 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
         onOpenChange={setLightboxOpen}
         onIndexChange={setLightboxIndex}
       />
+
+      {isRedeemOpen ? (
+        <div className="fixed inset-0 z-[1200] bg-black/30 px-4 pt-[max(1rem,env(safe-area-inset-top))] backdrop-blur-[2px] sm:flex sm:items-center sm:justify-center sm:p-4">
+          <div className="paper-surface leaf-glow mx-auto max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-[32px] bg-[#fffdf4]/95 p-6 shadow-[0_36px_120px_-45px_rgba(16,24,40,0.45)]">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold leading-none text-[#203d2b]">兑换 CDK</h2>
+                <p className="text-sm leading-6 text-[#6a7458]">输入管理员发放的 CDK，兑换后额度会立即到账。</p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-[#6a7458] transition hover:bg-[#edf6dc]"
+                onClick={() => setIsRedeemOpen(false)}
+                aria-label="关闭兑换窗口"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-stone-700">CDK</label>
+              <input
+                value={redeemCode}
+                onChange={(event) => setRedeemCode(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    void handleRedeemCdk();
+                  }
+                }}
+                placeholder="请输入 CDK"
+                className="h-12 w-full rounded-2xl border border-[#cad9b2] bg-[#fffdf4]/90 px-4 text-sm text-[#203d2b] outline-none transition duration-200 placeholder:text-[#8f9a78] focus:border-[#6f9f48] focus:ring-4 focus:ring-[#6f9f48]/15"
+              />
+            </div>
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" onClick={() => setIsRedeemOpen(false)}>
+                取消
+              </Button>
+              <Button className="nature-interactive bg-linear-to-br from-[#2f6233] to-[#6f9f48] text-[#fbf8ed] shadow-[0_12px_30px_-18px_rgba(47,98,51,0.8)] hover:brightness-105" onClick={() => void handleRedeemCdk()} disabled={isRedeeming}>
+                {isRedeeming ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                兑换
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {deleteConfirm ? (
         <Dialog open onOpenChange={(open) => (!open ? setDeleteConfirm(null) : null)}>
@@ -947,5 +1196,5 @@ export default function ImagePage() {
     );
   }
 
-  return <ImagePageContent isAdmin={session.role === "admin"} />;
+  return <ImagePageContent isAdmin={session.role === "admin"} isCustomer={session.role === "customer"} ownerId={session.subjectId || session.name || session.key} />;
 }

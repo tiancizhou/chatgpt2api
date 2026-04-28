@@ -8,6 +8,7 @@ from fastapi import HTTPException, Request
 from services.account_service import account_service
 from services.auth_service import auth_service
 from services.config import config
+from services.product_service import product_service
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST_DIR = BASE_DIR / "web_dist"
@@ -43,6 +44,14 @@ def require_admin(authorization: str | None) -> dict[str, object]:
     identity = require_identity(authorization)
     if identity.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"error": "admin permission required"})
+    return identity
+
+
+def require_product_user(authorization: str | None) -> dict[str, object]:
+    token = extract_bearer_token(authorization)
+    identity = product_service.authenticate_session(token)
+    if identity is None:
+        raise HTTPException(status_code=401, detail={"error": "authorization is invalid"})
     return identity
 
 

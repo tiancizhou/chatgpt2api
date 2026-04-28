@@ -3,7 +3,7 @@ import { httpRequest } from "@/lib/request";
 export type AccountType = "Free" | "Plus" | "ProLite" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
 export type ImageModel = "gpt-image-2" | "codex-gpt-image-2";
-export type AuthRole = "admin" | "user";
+export type AuthRole = "admin" | "user" | "customer";
 
 export type Account = {
   id: string;
@@ -82,6 +82,60 @@ export type ImageResponse = {
   data: Array<{ b64_json: string; revised_prompt?: string }>;
 };
 
+export type ProductImageJobStatus = "reserved" | "running" | "succeeded" | "refunded" | "failed";
+
+export type ProductImageJob = {
+  id: string;
+  status: ProductImageJobStatus;
+  kind: "generation" | "edit";
+  credit_cost: number;
+  prompt: string;
+  model: string;
+  result?: ImageResponse | null;
+  error_message?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  completed_at?: string | null;
+};
+
+export type ProductImageJobResponse = {
+  job_id: string;
+  status: ProductImageJobStatus;
+  credit_cost: number;
+};
+
+export type ProductUser = {
+  id: string;
+  username: string;
+  credit_balance: number;
+  enabled: boolean;
+  created_at: string | null;
+  last_login_at: string | null;
+};
+
+export type ProductAuthResponse = {
+  ok: boolean;
+  token: string;
+  role: "customer";
+  subject_id: string;
+  name: string;
+  user: ProductUser;
+  credit_balance: number;
+};
+
+export type CdkItem = {
+  id: string;
+  code?: string;
+  code_preview?: string;
+  credit_amount: number;
+  status: "unused" | "redeemed" | "disabled";
+  created_by?: string;
+  created_at?: string | null;
+  redeemed_by_user_id?: string | null;
+  redeemed_by_username?: string | null;
+  redeemed_at?: string | null;
+};
+
 export type LoginResponse = {
   ok: boolean;
   version: string;
@@ -149,6 +203,65 @@ export async function login(authKey: string) {
   });
 }
 
+export async function registerUser(username: string, password: string) {
+  return httpRequest<ProductAuthResponse>("/api/user/register", {
+    method: "POST",
+    body: { username, password },
+    redirectOnUnauthorized: false,
+  });
+}
+
+export async function loginWithPassword(username: string, password: string) {
+  return httpRequest<ProductAuthResponse>("/api/user/login", {
+    method: "POST",
+    body: { username, password },
+    redirectOnUnauthorized: false,
+  });
+}
+
+export async function fetchUserMe() {
+  return httpRequest<{ user: ProductUser; credit_balance: number }>("/api/user/me");
+}
+
+export async function fetchUserBalance() {
+  return httpRequest<{ credit_balance: number }>("/api/user/balance");
+}
+
+export async function redeemCdk(code: string) {
+  return httpRequest<{ credited: number; balance: number }>("/api/user/cdks/redeem", {
+    method: "POST",
+    body: { code },
+  });
+}
+
+export async function createCdks(creditAmount: number, count: number) {
+  return httpRequest<{ items: CdkItem[] }>("/api/admin/cdks", {
+    method: "POST",
+    body: { credit_amount: creditAmount, count },
+  });
+}
+
+export async function fetchCdks() {
+  return httpRequest<{ items: CdkItem[] }>("/api/admin/cdks");
+}
+
+export async function disableCdk(cdkId: string) {
+  return httpRequest<{ id: string; status: "disabled" }>(`/api/admin/cdks/${cdkId}/disable`, {
+    method: "POST",
+  });
+}
+
+export async function fetchProductUsers() {
+  return httpRequest<{ items: ProductUser[] }>("/api/admin/product/users");
+}
+
+export async function adjustProductUserCredits(userId: string, amount: number) {
+  return httpRequest<{ user: ProductUser }>(`/api/admin/product/users/${userId}/credits`, {
+    method: "POST",
+    body: { amount },
+  });
+}
+
 export async function fetchAccounts() {
   return httpRequest<AccountListResponse>("/api/accounts");
 }
@@ -203,6 +316,108 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
         n: 1,
         response_format: "b64_json",
       },
+    },
+  );
+}
+
+export async function generateUserImage(prompt: string, model?: ImageModel, size?: string) {
+  return httpRequest<ImageResponse>(
+    "/api/user/images/generations",
+    {
+      method: "POST",
+      body: {
+        prompt,
+        ...(model ? { model } : {}),
+        ...(size ? { size } : {}),
+        n: 1,
+        response_format: "b64_json",
+      },
+    },
+  );
+}
+
+export async function createUserImageGenerationJob(prompt: string, model?: ImageModel, size?: string, clientRequestId?: string) {
+  return httpRequest<ProductImageJobResponse>(
+    "/api/user/images/generations/jobs",
+    {
+      method: "POST",
+      body: {
+        prompt,
+        ...(model ? { model } : {}),
+        ...(size ? { size } : {}),
+        ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
+        n: 1,
+        response_format: "b64_json",
+      },
+    },
+  );
+}
+
+export async function fetchUserImageJob(jobId: string) {
+  return httpRequest<ProductImageJob>(`/api/user/images/jobs/${jobId}`);
+}
+
+export async function fetchUserImageHistory() {
+  return httpRequest<{ items: ProductImageJob[] }>("/api/user/images/history");
+}
+
+export async function deleteUserImageHistoryItem(jobId: string) {
+  return httpRequest<{ ok: boolean }>(`/api/user/images/history/${jobId}`, { method: "DELETE" });
+}
+
+export async function clearUserImageHistory() {
+  return httpRequest<{ ok: boolean }>("/api/user/images/history", { method: "DELETE" });
+}
+
+export async function editUserImage(files: File | File[], prompt: string, model?: ImageModel, size?: string) {
+  const formData = new FormData();
+  const uploadFiles = Array.isArray(files) ? files : [files];
+
+  uploadFiles.forEach((file) => {
+    formData.append("image", file);
+  });
+  formData.append("prompt", prompt);
+  if (model) {
+    formData.append("model", model);
+  }
+  if (size) {
+    formData.append("size", size);
+  }
+  formData.append("n", "1");
+
+  return httpRequest<ImageResponse>(
+    "/api/user/images/edits",
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export async function createUserImageEditJob(files: File | File[], prompt: string, model?: ImageModel, size?: string, clientRequestId?: string) {
+  const formData = new FormData();
+  const uploadFiles = Array.isArray(files) ? files : [files];
+
+  uploadFiles.forEach((file) => {
+    formData.append("image", file);
+  });
+  formData.append("prompt", prompt);
+  if (model) {
+    formData.append("model", model);
+  }
+  if (size) {
+    formData.append("size", size);
+  }
+  if (clientRequestId) {
+    formData.append("client_request_id", clientRequestId);
+  }
+  formData.append("n", "1");
+
+  return httpRequest<ProductImageJobResponse>(
+    "/api/user/images/edits/jobs",
+    {
+      method: "POST",
+      body: formData,
     },
   );
 }

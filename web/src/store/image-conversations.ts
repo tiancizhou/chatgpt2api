@@ -14,8 +14,10 @@ export type StoredReferenceImage = {
 
 export type StoredImage = {
   id: string;
+  jobId?: string;
   status?: "loading" | "success" | "error";
   b64_json?: string;
+  url?: string;
   error?: string;
 };
 
@@ -53,8 +55,18 @@ const imageConversationStorage = localforage.createInstance({
   storeName: "image_conversations",
 });
 
-const IMAGE_CONVERSATIONS_KEY = "items";
+const DEFAULT_IMAGE_CONVERSATIONS_KEY = "items";
 let imageConversationWriteQueue: Promise<void> = Promise.resolve();
+let imageConversationOwnerKey = DEFAULT_IMAGE_CONVERSATIONS_KEY;
+
+export function setImageConversationOwner(ownerId: string | null | undefined): void {
+  const normalizedOwnerId = String(ownerId || "").trim();
+  imageConversationOwnerKey = normalizedOwnerId ? `items:${normalizedOwnerId}` : DEFAULT_IMAGE_CONVERSATIONS_KEY;
+}
+
+function getImageConversationOwnerKey(): string {
+  return imageConversationOwnerKey;
+}
 
 function normalizeStoredImage(image: StoredImage): StoredImage {
   if (image.status === "loading" || image.status === "error" || image.status === "success") {
@@ -195,7 +207,7 @@ function queueImageConversationWrite<T>(operation: () => Promise<T>): Promise<T>
 async function readStoredImageConversations(): Promise<ImageConversation[]> {
   const items =
     (await imageConversationStorage.getItem<Array<ImageConversation & Record<string, unknown>>>(
-      IMAGE_CONVERSATIONS_KEY,
+      getImageConversationOwnerKey(),
     )) || [];
   return items.map(normalizeConversation);
 }
@@ -213,7 +225,7 @@ export async function saveImageConversations(conversations: ImageConversation[])
       conversationMap.set(conversation.id, current ? pickLatestConversation(current, conversation) : conversation);
     }
     await imageConversationStorage.setItem(
-      IMAGE_CONVERSATIONS_KEY,
+      getImageConversationOwnerKey(),
       sortImageConversations([...conversationMap.values()]),
     );
   });
@@ -229,7 +241,7 @@ export async function saveImageConversation(conversation: ImageConversation): Pr
       persistedConversation,
       ...items.filter((item) => item.id !== persistedConversation.id),
     ]);
-    await imageConversationStorage.setItem(IMAGE_CONVERSATIONS_KEY, nextItems);
+    await imageConversationStorage.setItem(getImageConversationOwnerKey(), nextItems);
   });
 }
 
@@ -237,7 +249,7 @@ export async function deleteImageConversation(id: string): Promise<void> {
   await queueImageConversationWrite(async () => {
     const items = await readStoredImageConversations();
     await imageConversationStorage.setItem(
-      IMAGE_CONVERSATIONS_KEY,
+      getImageConversationOwnerKey(),
       items.filter((item) => item.id !== id),
     );
   });
@@ -245,7 +257,7 @@ export async function deleteImageConversation(id: string): Promise<void> {
 
 export async function clearImageConversations(): Promise<void> {
   await queueImageConversationWrite(async () => {
-    await imageConversationStorage.removeItem(IMAGE_CONVERSATIONS_KEY);
+    await imageConversationStorage.removeItem(getImageConversationOwnerKey());
   });
 }
 

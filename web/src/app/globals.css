@@ -45,24 +45,24 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --background: oklch(0.985 0.018 103.2);
+  --foreground: oklch(0.22 0.045 151.7);
+  --card: oklch(0.992 0.012 103.5);
+  --card-foreground: oklch(0.22 0.045 151.7);
+  --popover: oklch(0.992 0.012 103.5);
+  --popover-foreground: oklch(0.22 0.045 151.7);
+  --primary: oklch(0.39 0.095 143.5);
+  --primary-foreground: oklch(0.985 0.018 103.2);
+  --secondary: oklch(0.92 0.055 134.4);
+  --secondary-foreground: oklch(0.27 0.07 143.5);
+  --muted: oklch(0.94 0.035 111.5);
+  --muted-foreground: oklch(0.48 0.04 114.1);
+  --accent: oklch(0.9 0.045 191.2);
+  --accent-foreground: oklch(0.27 0.065 154.2);
+  --destructive: oklch(0.58 0.17 32.5);
+  --border: oklch(0.87 0.035 116.7);
+  --input: oklch(0.87 0.035 116.7);
+  --ring: oklch(0.59 0.12 141.7);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -122,6 +122,74 @@
 }
 
 @layer utilities {
+  .nature-canvas {
+    isolation: isolate;
+    background:
+      radial-gradient(circle at 12% 8%, rgba(188, 225, 155, 0.42), transparent 30%),
+      radial-gradient(circle at 88% 14%, rgba(171, 216, 226, 0.42), transparent 28%),
+      radial-gradient(circle at 72% 88%, rgba(183, 144, 92, 0.18), transparent 32%),
+      linear-gradient(135deg, #fbf8ed 0%, #edf5dd 48%, #eaf5f4 100%);
+    position: relative;
+  }
+
+  .nature-canvas > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .nature-canvas::before {
+    pointer-events: none;
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    opacity: 0.18;
+    background-image:
+      linear-gradient(115deg, rgba(60, 103, 69, 0.07) 0 1px, transparent 1px 12px),
+      radial-gradient(circle, rgba(75, 98, 58, 0.16) 0.5px, transparent 0.7px);
+    background-size: 120px 120px, 6px 6px;
+    mix-blend-mode: multiply;
+  }
+
+  .paper-surface {
+    border: 1px solid rgba(131, 154, 94, 0.28);
+    background:
+      linear-gradient(135deg, rgba(255, 253, 244, 0.94), rgba(241, 248, 226, 0.9)),
+      repeating-linear-gradient(105deg, rgba(66, 101, 69, 0.035) 0 1px, transparent 1px 13px);
+    box-shadow: 0 24px 80px -46px rgba(43, 75, 48, 0.48), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  }
+
+  .leaf-glow {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .leaf-glow::after {
+    pointer-events: none;
+    content: "";
+    position: absolute;
+    right: -32px;
+    top: -38px;
+    width: 140px;
+    height: 140px;
+    border-radius: 58% 42% 64% 36%;
+    border: 1px solid rgba(75, 125, 75, 0.16);
+    background: radial-gradient(circle at 35% 35%, rgba(186, 221, 136, 0.34), transparent 62%);
+    transform: rotate(-18deg);
+  }
+
+  .nature-interactive {
+    transition: transform 180ms ease, filter 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  }
+
+  .nature-interactive:hover {
+    filter: brightness(1.04);
+  }
+
+  .nature-interactive:active {
+    transform: translateY(1px) scale(0.995);
+  }
+
   .hide-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;

@@ -50,17 +50,6 @@ request.interceptors.response.use(
     async (error: AxiosError<ErrorPayload>) => {
         const status = error.response?.status;
         const shouldRedirect = (error.config as RequestConfig | undefined)?.redirectOnUnauthorized !== false;
-        if (status === 401 && shouldRedirect && typeof window !== "undefined") {
-            // Avoid redirect loop — only redirect if not already on /login
-            if (!window.location.pathname.startsWith("/login")) {
-                await clearStoredAuthSession();
-                window.location.replace("/login");
-                // Return a never-resolving promise to prevent further error handling
-                // while the browser navigates away
-                return new Promise(() => {});
-            }
-        }
-
         const payload = error.response?.data;
         const message =
             errorMessageFromValue(payload?.detail) ||
@@ -68,6 +57,13 @@ request.interceptors.response.use(
             payload?.message ||
             error.message ||
             `请求失败 (${status || 500})`;
+
+        if (status === 401 && shouldRedirect && typeof window !== "undefined") {
+            if (!window.location.pathname.startsWith("/login")) {
+                await clearStoredAuthSession();
+                window.location.replace("/login");
+            }
+        }
         return Promise.reject(new Error(message));
     },
 );
