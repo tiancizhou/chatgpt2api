@@ -508,12 +508,20 @@ def stream_image_outputs(
         yield ImageOutput(kind="message", model=request.model, index=index, total=total, text=message)
         return
 
+    t0 = time.time()
     image_urls = backend.resolve_conversation_image_urls(conversation_id, file_ids, sediment_ids)
+    t1 = time.time()
+    logger.info({"event": "image_perf", "step": "resolve_urls", "elapsed_ms": int((t1 - t0) * 1000), "url_count": len(image_urls)})
     if image_urls:
+        image_bytes_list = backend.download_image_bytes(image_urls)
+        t2 = time.time()
+        logger.info({"event": "image_perf", "step": "download_bytes", "elapsed_ms": int((t2 - t1) * 1000)})
         image_items = [
             {"b64_json": base64.b64encode(image_data).decode("ascii")}
-            for image_data in backend.download_image_bytes(image_urls)
+            for image_data in image_bytes_list
         ]
+        t3 = time.time()
+        logger.info({"event": "image_perf", "step": "base64_encode", "elapsed_ms": int((t3 - t2) * 1000)})
         data = format_image_result(
             image_items,
             request.prompt,
@@ -521,6 +529,8 @@ def stream_image_outputs(
             request.base_url,
             int(time.time()),
         )["data"]
+        t4 = time.time()
+        logger.info({"event": "image_perf", "step": "format_and_save", "elapsed_ms": int((t4 - t3) * 1000)})
         if data:
             yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data)
         return
