@@ -1056,25 +1056,36 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
 
   const handleRetryTurn = useCallback(
     async (conversationId: string, turnId: string) => {
+      const conversation = conversationsRef.current.find((c) => c.id === conversationId);
+      const failedTurn = conversation?.turns.find((t) => t.id === turnId);
+      if (!conversation || !failedTurn) {
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const newTurnId = createId();
+      const newTurn: ImageTurn = {
+        id: newTurnId,
+        prompt: failedTurn.prompt,
+        model: failedTurn.model,
+        mode: failedTurn.mode,
+        referenceImages: failedTurn.referenceImages,
+        count: failedTurn.count,
+        size: failedTurn.size,
+        images: Array.from({ length: failedTurn.count }, (_, index) => ({
+          id: `${newTurnId}-${index}`,
+          status: "loading" as const,
+        })),
+        createdAt: now,
+        status: "queued",
+      };
+
       await updateConversation(conversationId, (current) => {
-        if (!current) return null as unknown as ImageConversation;
+        const conv = current ?? conversation;
         return {
-          ...current,
-          updatedAt: new Date().toISOString(),
-          turns: current.turns.map((turn) =>
-            turn.id === turnId
-              ? {
-                  ...turn,
-                  status: "queued" as const,
-                  error: undefined,
-                  images: turn.images.map((image) =>
-                    image.status === "error"
-                      ? { id: image.id, status: "loading" as const }
-                      : image,
-                  ),
-                }
-              : turn,
-          ),
+          ...conv,
+          updatedAt: now,
+          turns: [...conv.turns, newTurn],
         };
       });
       void runConversationQueue(conversationId);
