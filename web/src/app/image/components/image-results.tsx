@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Clock3, LoaderCircle, Sparkles, StopCircle } from "lucide-react";
+import { Clock3, LoaderCircle, RotateCcw, Sparkles, StopCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ type ImageResultsProps = {
   onOpenLightbox: (images: ImageLightboxItem[], index: number) => void;
   onContinueEdit: (conversationId: string, image: StoredImage | StoredReferenceImage) => void;
   onCancelTurn: (conversationId: string, turnId: string) => void;
+  onRetryTurn: (conversationId: string, turnId: string) => void;
   formatConversationTime: (value: string) => string;
   onUseExamplePrompt?: (prompt: string) => void;
   canEdit?: boolean;
@@ -35,6 +36,7 @@ export function ImageResults({
   onOpenLightbox,
   onContinueEdit,
   onCancelTurn,
+  onRetryTurn,
   formatConversationTime,
   onUseExamplePrompt,
   canEdit = true,
@@ -162,6 +164,16 @@ export function ImageResults({
                     取消
                   </button>
                 ) : null}
+                {turn.status === "error" ? (
+                  <button
+                    type="button"
+                    onClick={() => onRetryTurn(selectedConversation.id, turn.id)}
+                    className="nature-interactive inline-flex items-center gap-1 rounded-full border border-[#b8d48a] bg-[#edf6dc] px-3 py-1 font-medium text-[#315f35] hover:bg-[#daefc0]"
+                  >
+                    <RotateCcw className="size-3" />
+                    重试
+                  </button>
+                ) : null}
               </div>
 
               <div className="columns-1 gap-4 space-y-4 sm:columns-2 xl:columns-3">
@@ -252,8 +264,16 @@ export function ImageResults({
               </div>
 
               {turn.status === "error" && turn.error ? (
-                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm leading-6 text-amber-700">
-                  {turn.error}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm leading-6 text-amber-700">
+                  <span>{turn.error}</span>
+                  <button
+                    type="button"
+                    onClick={() => onRetryTurn(selectedConversation.id, turn.id)}
+                    className="nature-interactive inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#b8d48a] bg-[#edf6dc] px-3 py-1 text-xs font-medium text-[#315f35] hover:bg-[#daefc0]"
+                  >
+                    <RotateCcw className="size-3" />
+                    重试
+                  </button>
                 </div>
               ) : null}
             </div>

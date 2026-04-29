@@ -1052,6 +1052,34 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
   );
   /* eslint-enable react-hooks/preserve-manual-memoization */
 
+  const handleRetryTurn = useCallback(
+    async (conversationId: string, turnId: string) => {
+      await updateConversation(conversationId, (current) => {
+        if (!current) return null as unknown as ImageConversation;
+        return {
+          ...current,
+          updatedAt: new Date().toISOString(),
+          turns: current.turns.map((turn) =>
+            turn.id === turnId
+              ? {
+                  ...turn,
+                  status: "queued" as const,
+                  error: undefined,
+                  images: turn.images.map((image) =>
+                    image.status === "error"
+                      ? { id: image.id, status: "loading" as const }
+                      : image,
+                  ),
+                }
+              : turn,
+          ),
+        };
+      });
+      void runConversationQueue(conversationId);
+    },
+    [updateConversation, runConversationQueue],
+  );
+
   useEffect(() => {
     for (const conversation of conversations) {
       if (
@@ -1247,6 +1275,7 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
               onOpenLightbox={openLightbox}
               onContinueEdit={handleContinueEdit}
               onCancelTurn={handleCancelTurn}
+              onRetryTurn={handleRetryTurn}
               formatConversationTime={formatConversationTime}
               onUseExamplePrompt={handleUseExamplePrompt}
               canEdit
