@@ -276,9 +276,9 @@ export function ImageComposer({
                     }}
                     desktop
                   />
-                  {canEdit ? (
+                  {canEdit && isEditingImage ? (
                     <div className="rounded-full bg-[#edf6dc] px-3 py-2 text-xs font-medium text-[#526642]">
-                      {isEditingImage ? "已上传参考图，将修改图片" : "未上传参考图，将从文字生成"}
+                      已上传参考图，将修改图片
                     </div>
                   ) : null}
                 </div>
