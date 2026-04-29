@@ -203,6 +203,7 @@ def _deserialize_json(value: str | None) -> object | None:
 
 
 def _public_image_job(row: Any, include_result: bool = True) -> dict[str, object]:
+    result_urls = _deserialize_json(getattr(row, "result_urls", "[]"))
     return {
         "id": row.id,
         "status": row.status,
@@ -212,6 +213,7 @@ def _public_image_job(row: Any, include_result: bool = True) -> dict[str, object
         "prompt": row.prompt,
         "model": row.model,
         "result": _deserialize_json(getattr(row, "result_payload", "")) if include_result else None,
+        "result_urls": result_urls if isinstance(result_urls, list) else [],
         "error_message": row.error_message or "",
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if getattr(row, "updated_at", None) else None,
@@ -516,6 +518,7 @@ class ProductService:
                         "id": existing_job.id,
                         "cost": int(existing_job.credit_cost),
                         "balance": int(user.credit_balance or 0) if user is not None else 0,
+                        "status": existing_job.status,
                         "existing": True,
                     }
             user = connection.execute(select(product_users).where(product_users.c.id == user_id)).first()
@@ -575,7 +578,7 @@ class ProductService:
                 .values(
                     status="succeeded",
                     result_urls=json.dumps(urls, ensure_ascii=False),
-                    result_payload="",
+                    result_payload=_serialize_json(result),
                     updated_at=now,
                     completed_at=now,
                 )

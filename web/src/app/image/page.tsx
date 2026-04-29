@@ -18,15 +18,18 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
+  createUserImageEditJob,
+  createUserImageGenerationJob,
   editImage,
-  editUserImage,
   fetchAccounts,
   fetchUserBalance,
+  fetchUserImageJob,
   generateImage,
-  generateUserImage,
   logoutUser,
   redeemCdk,
   type Account,
+  type ImageModel,
+  type ProductImageJob,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { clearStoredAuthSession } from "@/store/auth";
@@ -119,6 +122,99 @@ function buildReferenceImageFromResult(image: StoredImage, fileName: string): St
   };
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+type CustomerImageJobResult = {
+  url?: string;
+  b64_json?: string;
+};
+
+function isTransientNetworkError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return /network error|failed to fetch|load failed|timeout|timed out/i.test(message);
+}
+
+async function waitForCustomerImageJob({
+  mode,
+  files,
+  prompt,
+  model,
+  size,
+  clientRequestId,
+  existingJobId,
+  isCancelled,
+  onJobId,
+}: {
+  mode: ImageConversationMode;
+  files: File[];
+  prompt: string;
+  model: ImageModel;
+  size: string;
+  clientRequestId: string;
+  existingJobId?: string;
+  isCancelled: () => boolean;
+  onJobId: (jobId: string) => Promise<void>;
+}): Promise<CustomerImageJobResult> {
+  let jobId = existingJobId;
+
+  const startedAt = Date.now();
+  while (!jobId) {
+    if (isCancelled()) {
+      throw new Error("已取消");
+    }
+    try {
+      const created =
+        mode === "edit"
+          ? await createUserImageEditJob(files, prompt, model, size, clientRequestId)
+          : await createUserImageGenerationJob(prompt, model, size, clientRequestId);
+      jobId = created.job_id;
+      await onJobId(jobId);
+    } catch (error) {
+      if (!isTransientNetworkError(error)) {
+        throw error;
+      }
+      await sleep(SLOW_IMAGE_JOB_POLL_INTERVAL_MS);
+    }
+  }
+
+  while (true) {
+    if (isCancelled()) {
+      throw new Error("已取消");
+    }
+
+    let job: ProductImageJob;
+    try {
+      job = await fetchUserImageJob(jobId);
+    } catch {
+      await sleep(SLOW_IMAGE_JOB_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (job.status === "succeeded") {
+      const first = job.result?.data?.[0];
+      const url = first?.url || job.result_urls?.[0];
+      const b64_json = first?.b64_json;
+      if (!url && !b64_json) {
+        throw new Error("未返回图片数据");
+      }
+      return { url, b64_json };
+    }
+
+    if (job.status === "refunded" || job.status === "failed") {
+      const reason = String(job.error_message || "").trim();
+      throw new Error(reason ? `生成失败，额度已退回：${reason}` : "生成失败，额度已退回");
+    }
+
+    const interval =
+      Date.now() - startedAt < IMAGE_JOB_FAST_POLL_WINDOW_MS
+        ? FAST_IMAGE_JOB_POLL_INTERVAL_MS
+        : SLOW_IMAGE_JOB_POLL_INTERVAL_MS;
+    await sleep(interval);
+  }
+}
+
 function pickFallbackConversationId(conversations: ImageConversation[]) {
   const activeConversation = conversations.find((conversation) =>
     conversation.turns.some((turn) => turn.status === "queued" || turn.status === "generating"),
@@ -197,10 +293,12 @@ function ImageCreditSummary({
   availableQuota,
   isCustomer,
   onRedeem,
+  onLogout,
 }: {
   availableQuota: string;
   isCustomer: boolean;
   onRedeem: () => void;
+  onLogout: () => void;
 }) {
   if (!isCustomer) {
     return null;
@@ -213,14 +311,24 @@ function ImageCreditSummary({
         <span className="mx-1 text-[#cad9b2]">|</span>
         每张 2 额度
       </div>
-      <button
-        type="button"
-        className="nature-interactive inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-[#edf6dc] px-3 font-semibold text-[#315f35] sm:h-10 sm:bg-linear-to-br sm:from-[#2f6233] sm:to-[#6f9f48] sm:text-[#fbf8ed]"
-        onClick={onRedeem}
-      >
-        <Ticket className="size-3.5" />
-        兑换
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className="nature-interactive inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-[#edf6dc] px-3 font-semibold text-[#315f35] sm:h-10 sm:bg-linear-to-br sm:from-[#2f6233] sm:to-[#6f9f48] sm:text-[#fbf8ed]"
+          onClick={onRedeem}
+        >
+          <Ticket className="size-3.5" />
+          兑换
+        </button>
+        <button
+          type="button"
+          className="nature-interactive inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[#cad9b2]/70 bg-[#fffdf4]/82 px-3 font-semibold text-[#315f35] shadow-sm sm:h-10"
+          onClick={onLogout}
+        >
+          <LogOut className="size-3.5" />
+          退出
+        </button>
+      </div>
     </div>
   );
 }
@@ -768,14 +876,49 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
           }
           try {
             let finalJobId = currentJobId;
-            const data = isCustomer
-              ? queuedTurn.mode === "edit"
-                ? await editUserImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
-                : await generateUserImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
-              : queuedTurn.mode === "edit"
+            let first: CustomerImageJobResult | undefined;
+            if (isCustomer) {
+              first = await waitForCustomerImageJob({
+                mode: queuedTurn.mode,
+                files: referenceFiles,
+                prompt: queuedTurn.prompt,
+                model: queuedTurn.model,
+                size: queuedTurn.size,
+                clientRequestId: pendingImage.id,
+                existingJobId: currentJobId,
+                isCancelled: () => cancelledTurnIds.has(queuedTurn.id),
+                onJobId: async (jobId) => {
+                  currentJobId = jobId;
+                  finalJobId = jobId;
+                  await updateConversation(
+                    conversationId,
+                    (current) => {
+                      const conversation = current ?? snapshot;
+                      return {
+                        ...conversation,
+                        updatedAt: new Date().toISOString(),
+                        turns: conversation.turns.map((turn) =>
+                          turn.id === queuedTurn.id
+                            ? {
+                                ...turn,
+                                images: turn.images.map((image) =>
+                                  image.id === pendingImage.id ? { ...image, jobId } : image,
+                                ),
+                              }
+                            : turn,
+                        ),
+                      };
+                    },
+                    { persist: true },
+                  );
+                },
+              });
+            } else {
+              const data = queuedTurn.mode === "edit"
                 ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
                 : await generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size);
-            const first = data.data?.[0];
+              first = data.data?.[0];
+            }
 
             if (!first?.url && !first?.b64_json) {
               throw new Error("未返回图片数据");
@@ -1090,6 +1233,7 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
             availableQuota={availableQuota}
             isCustomer={isCustomer}
             onRedeem={() => setIsRedeemOpen(true)}
+            onLogout={() => void handleLogout()}
           />
 
           <div

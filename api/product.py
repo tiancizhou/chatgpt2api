@@ -154,7 +154,8 @@ async def _run_generation_job(job_id: str, identity: dict[str, object], payload:
                     await run_in_threadpool(product_service.refund_image_job, job_id, error)
                     _log_image_job_timing(identity, job_id, "generation", model, "failed", _duration_ms(total_started_at), queue_wait_ms, upstream_ms, _duration_ms(persist_started_at), error)
                     return
-                await run_in_threadpool(product_service.complete_image_job, job_id, result)
+                url_result = await run_in_threadpool(_replace_b64_with_url, result, job_id, str(payload.get("base_url") or ""))
+                await run_in_threadpool(product_service.complete_image_job, job_id, url_result)
                 _log_image_job_timing(identity, job_id, "generation", model, "success", _duration_ms(total_started_at), queue_wait_ms, upstream_ms, _duration_ms(persist_started_at))
             except Exception as exc:
                 upstream_ms = _duration_ms(upstream_started_at)
@@ -184,7 +185,8 @@ async def _run_edit_job(job_id: str, identity: dict[str, object], payload: dict[
                     await run_in_threadpool(product_service.refund_image_job, job_id, error)
                     _log_image_job_timing(identity, job_id, "edit", model, "failed", _duration_ms(total_started_at), queue_wait_ms, upstream_ms, _duration_ms(persist_started_at), error)
                     return
-                await run_in_threadpool(product_service.complete_image_job, job_id, result)
+                url_result = await run_in_threadpool(_replace_b64_with_url, result, job_id, str(payload.get("base_url") or ""))
+                await run_in_threadpool(product_service.complete_image_job, job_id, url_result)
                 _log_image_job_timing(identity, job_id, "edit", model, "success", _duration_ms(total_started_at), queue_wait_ms, upstream_ms, _duration_ms(persist_started_at))
             except Exception as exc:
                 upstream_ms = _duration_ms(upstream_started_at)
@@ -267,6 +269,10 @@ def create_router() -> APIRouter:
         except ProductServiceError as exc:
             _raise_product_error(exc)
 
+        if job.get("existing"):
+            existing_job = await run_in_threadpool(product_service.get_image_job, str(identity["user_id"]), str(job["id"]))
+            return {"job_id": job["id"], "status": existing_job["status"], "credit_cost": existing_job["credit_cost"]}
+
         payload = body.model_dump(mode="python", exclude={"client_request_id"})
         payload["n"] = 1
         payload["stream"] = False
@@ -334,8 +340,8 @@ def create_router() -> APIRouter:
             if isinstance(result, JSONResponse) and result.status_code >= 400:
                 await run_in_threadpool(product_service.refund_image_job, str(job["id"]), _error_message_from_response(result))
                 return result
-            await run_in_threadpool(product_service.complete_image_job, str(job["id"]), result)
             url_result = await run_in_threadpool(_replace_b64_with_url, result, str(job["id"]), resolve_image_base_url(request))
+            await run_in_threadpool(product_service.complete_image_job, str(job["id"]), url_result)
             return url_result
         except asyncio.CancelledError:
             await run_in_threadpool(product_service.fail_image_job_without_refund, str(job["id"]), "请求已取消")
@@ -384,6 +390,10 @@ def create_router() -> APIRouter:
             )
         except ProductServiceError as exc:
             _raise_product_error(exc)
+
+        if job.get("existing"):
+            existing_job = await run_in_threadpool(product_service.get_image_job, str(identity["user_id"]), str(job["id"]))
+            return {"job_id": job["id"], "status": existing_job["status"], "credit_cost": existing_job["credit_cost"]}
 
         payload = {
             "prompt": prompt,
@@ -452,8 +462,8 @@ def create_router() -> APIRouter:
             if isinstance(result, JSONResponse) and result.status_code >= 400:
                 await run_in_threadpool(product_service.refund_image_job, str(job["id"]), _error_message_from_response(result))
                 return result
-            await run_in_threadpool(product_service.complete_image_job, str(job["id"]), result)
             url_result = await run_in_threadpool(_replace_b64_with_url, result, str(job["id"]), resolve_image_base_url(request))
+            await run_in_threadpool(product_service.complete_image_job, str(job["id"]), url_result)
             return url_result
         except asyncio.CancelledError:
             await run_in_threadpool(product_service.fail_image_job_without_refund, str(job["id"]), "请求已取消")

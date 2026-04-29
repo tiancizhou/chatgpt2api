@@ -29,10 +29,10 @@ class ProductImageHistoryTests(unittest.TestCase):
         failed = self.service.start_image_job(user_id, "failed prompt", "gpt-image-2")
         other = self.service.start_image_job(other_user_id, "other prompt", "gpt-image-2")
 
-        self.service.complete_image_job(str(first["id"]), {"data": [{"b64_json": "FIRST"}]})
-        self.service.complete_image_job(str(second["id"]), {"data": [{"b64_json": "SECOND"}]})
+        self.service.complete_image_job(str(first["id"]), {"data": [{"url": "https://example.test/first.png"}]})
+        self.service.complete_image_job(str(second["id"]), {"data": [{"url": "https://example.test/second.png"}]})
         self.service.refund_image_job(str(failed["id"]), "failed")
-        self.service.complete_image_job(str(other["id"]), {"data": [{"b64_json": "OTHER"}]})
+        self.service.complete_image_job(str(other["id"]), {"data": [{"url": "https://example.test/other.png"}]})
 
         history = self.service.list_user_image_history(user_id)
 
@@ -42,7 +42,29 @@ class ProductImageHistoryTests(unittest.TestCase):
         self.assertIsNone(history[0]["result"])
 
         full_job = self.service.get_image_job(user_id, str(second["id"]))
-        self.assertIsNone(full_job["result"])
+        self.assertEqual(full_job["result"]["data"][0]["url"], "https://example.test/second.png")
+        self.assertEqual(full_job["result_urls"], ["https://example.test/second.png"])
+
+    def test_start_image_job_with_existing_client_request_id_is_idempotent(self) -> None:
+        user_id = self._register_user("carol")
+        self.service.adjust_user_credits(user_id, 20)
+
+        first = self.service.start_image_job(
+            user_id,
+            "prompt",
+            "gpt-image-2",
+            client_request_id="stable-request-id",
+        )
+        second = self.service.start_image_job(
+            user_id,
+            "prompt",
+            "gpt-image-2",
+            client_request_id="stable-request-id",
+        )
+
+        self.assertEqual(second["id"], first["id"])
+        self.assertTrue(second["existing"])
+        self.assertEqual(self.service.get_user(user_id)["credit_balance"], 18)
 
 
 if __name__ == "__main__":

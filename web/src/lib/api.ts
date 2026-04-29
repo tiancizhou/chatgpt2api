@@ -79,7 +79,7 @@ export type SystemLog = {
 
 export type ImageResponse = {
   created: number;
-  data: Array<{ b64_json: string; revised_prompt?: string }>;
+  data: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
 };
 
 export type ProductImageJobStatus = "reserved" | "running" | "succeeded" | "refunded" | "failed";
@@ -92,6 +92,7 @@ export type ProductImageJob = {
   prompt: string;
   model: string;
   result?: ImageResponse | null;
+  result_urls?: string[];
   error_message?: string;
   created_at?: string | null;
   updated_at?: string | null;
