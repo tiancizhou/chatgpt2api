@@ -511,7 +511,7 @@ class OpenAIBackendAPI:
                 logger.info({"event": "image_poll_hit", "conversation_id": conversation_id, "file_ids": [], "sediment_ids": sediment_ids})
                 return [], sediment_ids
             logger.debug({"event": "image_poll_wait", "conversation_id": conversation_id, "elapsed_secs": round(time.time() - start, 1)})
-            time.sleep(4)
+            time.sleep(1)
         logger.info({"event": "image_poll_timeout", "conversation_id": conversation_id, "timeout_secs": timeout_secs})
         return [], []
 
