@@ -51,7 +51,7 @@ import {
 
 const ACTIVE_CONVERSATION_STORAGE_KEY = "chatgpt2api:image_active_conversation_id";
 const IMAGE_SIZE_STORAGE_KEY = "chatgpt2api:image_last_size";
-const FAST_IMAGE_JOB_POLL_INTERVAL_MS = 2000;
+const FAST_IMAGE_JOB_POLL_INTERVAL_MS = 500;
 const SLOW_IMAGE_JOB_POLL_INTERVAL_MS = 5000;
 const IMAGE_JOB_FAST_POLL_WINDOW_MS = 30000;
 const activeConversationQueueIds = new Set<string>();

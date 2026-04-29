@@ -22,10 +22,13 @@ PRODUCT_IMAGES_DIR = DATA_DIR / "product_images"
 
 
 def _save_b64_as_file(b64_data: str, job_id: str, base_url: str) -> str:
+    from PIL import Image
+    import io
     PRODUCT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     image_bytes = base64.b64decode(b64_data)
-    filename = f"{job_id}.png"
-    (PRODUCT_IMAGES_DIR / filename).write_bytes(image_bytes)
+    img = Image.open(io.BytesIO(image_bytes))
+    filename = f"{job_id}.webp"
+    img.save(PRODUCT_IMAGES_DIR / filename, format="WEBP", quality=85)
     return f"{base_url}/product_images/{filename}"
 
 
