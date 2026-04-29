@@ -153,6 +153,11 @@ export function ImageResults({
               <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-[#6a7458]">
                 <span className="rounded-full bg-[#edf6dc] px-3 py-1">生成结果</span>
                 <span className="rounded-full bg-[#edf6dc] px-3 py-1">{getTurnStatusLabel(turn.status)}</span>
+                {turn.completedAt && (turn.status === "success" || turn.status === "error") ? (
+                  <span className="rounded-full bg-[#edf6dc] px-3 py-1">
+                    用时 {formatElapsedSeconds(turn.createdAt, turn.completedAt)}
+                  </span>
+                ) : null}
                 {turn.status === "queued" ? <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">已排队，马上开始</span> : null}
                 {turn.status === "generating" || turn.status === "queued" ? (
                   <button
@@ -322,4 +327,14 @@ function formatBase64ImageSize(base64: string) {
 
 function formatImageDimensions(width: number, height: number) {
   return `${width} x ${height}`;
+}
+
+function formatElapsedSeconds(startIso: string, endIso: string) {
+  const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+  if (ms < 0) return "";
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainSeconds = seconds % 60;
+  return remainSeconds > 0 ? `${minutes}m ${remainSeconds}s` : `${minutes}m`;
 }

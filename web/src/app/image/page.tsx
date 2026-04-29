@@ -860,6 +860,7 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
                   ? {
                       ...turn,
                       status: existingFailedCount > 0 ? "error" : existingSuccessCount > 0 ? "success" : "queued",
+                      completedAt: existingSuccessCount > 0 || existingFailedCount > 0 ? new Date().toISOString() : undefined,
                       error: existingFailedCount > 0 ? `其中 ${existingFailedCount} 张未成功生成` : undefined,
                     }
                   : turn,
@@ -1006,6 +1007,7 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
                 ? {
                     ...turn,
                     status: failedCount > 0 ? "error" : "success",
+                    completedAt: new Date().toISOString(),
                     error: failedCount > 0 ? `其中 ${failedCount} 张未成功生成` : undefined,
                   }
                 : turn,

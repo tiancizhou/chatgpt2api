@@ -33,6 +33,7 @@ export type ImageTurn = {
   size: string;
   images: StoredImage[];
   createdAt: string;
+  completedAt?: string;
   status: ImageTurnStatus;
   error?: string;
 };
@@ -139,6 +140,7 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
     size: typeof turn.size === "string" ? turn.size : "",
     images: normalizedImages,
     createdAt: String(turn.createdAt || new Date().toISOString()),
+    completedAt: typeof turn.completedAt === "string" ? turn.completedAt : undefined,
     status:
       turn.status === "queued" ||
       turn.status === "generating" ||
