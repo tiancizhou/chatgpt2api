@@ -510,7 +510,17 @@ def stream_image_outputs(
 
     image_urls = backend.resolve_conversation_image_urls(conversation_id, file_ids, sediment_ids)
     if image_urls:
-        data = [{"url": url, "revised_prompt": request.prompt} for url in image_urls]
+        image_items = [
+            {"b64_json": base64.b64encode(image_data).decode("ascii")}
+            for image_data in backend.download_image_bytes(image_urls)
+        ]
+        data = format_image_result(
+            image_items,
+            request.prompt,
+            request.response_format,
+            request.base_url,
+            int(time.time()),
+        )["data"]
         if data:
             yield ImageOutput(kind="result", model=request.model, index=index, total=total, data=data)
         return
