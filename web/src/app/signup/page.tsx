@@ -134,6 +134,13 @@ export default function SignupPage() {
               返回登录
             </Link>
           </p>
+
+          <div className="flex items-center gap-2 rounded-2xl border border-[#b8d48a] bg-[#edf6dc] px-4 py-3 text-sm text-[#3a6b2a]">
+            <span className="text-base">🎁</span>
+            <span>
+              免费领取额度，加 VX：<span className="font-semibold tracking-wide">DMQ_QQ_DMQ</span>
+            </span>
+          </div>
         </CardContent>
       </Card>
     </div>
