@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObje
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import type { ImageConversationMode } from "@/store/image-conversations";
 import { cn } from "@/lib/utils";
@@ -12,11 +11,7 @@ import { cn } from "@/lib/utils";
 type ImageComposerProps = {
   mode: ImageConversationMode;
   prompt: string;
-  imageCount: string;
   imageSize: string;
-  availableQuota: string;
-  quotaLabel?: string;
-  costHint?: string;
   canEdit?: boolean;
   canSubmit?: boolean;
   submitDisabledReason?: string;
@@ -26,7 +21,6 @@ type ImageComposerProps = {
   fileInputRef: RefObject<HTMLInputElement | null>;
   onModeChange: (value: ImageConversationMode) => void;
   onPromptChange: (value: string) => void;
-  onImageCountChange: (value: string) => void;
   onImageSizeChange: (value: string) => void;
   onSubmit: () => void | Promise<void>;
   onPickReferenceImage: () => void;
@@ -46,11 +40,7 @@ const imageSizeOptions = [
 export function ImageComposer({
   mode,
   prompt,
-  imageCount,
   imageSize,
-  availableQuota,
-  quotaLabel = "剩余额度",
-  costHint = "",
   canEdit = true,
   canSubmit = true,
   submitDisabledReason = "",
@@ -60,7 +50,6 @@ export function ImageComposer({
   fileInputRef,
   onModeChange,
   onPromptChange,
-  onImageCountChange,
   onImageSizeChange,
   onSubmit,
   onPickReferenceImage,
@@ -81,7 +70,6 @@ export function ImageComposer({
   const isEditingImage = canEdit && referenceImages.length > 0;
   const submitDisabled = !canSubmit || !prompt.trim();
   const primaryActionLabel = isEditingImage ? "修改图片" : "生成";
-  const helperText = submitDisabledReason || costHint || `${quotaLabel} ${availableQuota}`;
 
   useEffect(() => {
     if (!isSizeMenuOpen) {
@@ -114,10 +102,6 @@ export function ImageComposer({
     void onReferenceImageChange(imageFiles);
   };
 
-  const handlePickReferenceImage = () => {
-    onPickReferenceImage();
-  };
-
   return (
     <div className="shrink-0 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:pb-0">
       <div className="mx-auto w-full max-w-[980px]">
@@ -130,6 +114,8 @@ export function ImageComposer({
             className="hidden"
             onChange={(event) => {
               void onReferenceImageChange(Array.from(event.target.files || []));
+              // 允许重复选同一文件
+              event.target.value = "";
             }}
           />
         ) : null}
@@ -209,6 +195,7 @@ export function ImageComposer({
             />
 
             <div ref={sizeMenuRef} className="bg-[#fffdf4] px-3 pb-3 pt-1 sm:px-6 sm:pb-4 sm:pt-2">
+              {/* 移动端底部工具栏 */}
               <div className="space-y-2 sm:hidden">
                 <div className="flex items-center justify-between gap-2 px-1">
                   <button
@@ -222,77 +209,62 @@ export function ImageComposer({
                   </button>
                   <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
                     {canEdit ? (
-                    <button
-                      type="button"
-                      onClick={handlePickReferenceImage}
-                      className="nature-interactive inline-flex shrink-0 items-center gap-1 rounded-full border border-[#cad9b2] bg-[#fffdf4] px-2.5 py-1.5 text-xs font-semibold text-[#315f35]"
-                    >
-                      <ImagePlus className="size-3.5" />
-                      {referenceImages.length > 0 ? "加图" : "传图"}
-                    </button>
-                  ) : null}
-                  <div className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#cad9b2] bg-[#fffdf4] p-0.5 text-xs font-semibold text-[#315f35]">
-                    <button
-                      type="button"
-                      onClick={() => setIsMobileSettingsOpen((open) => !open)}
-                      className={cn(
-                        "nature-interactive inline-flex h-7 items-center gap-1 rounded-full px-2",
-                        isMobileSettingsOpen && "bg-[#edf6dc]",
-                      )}
-                    >
-                      <SlidersHorizontal className="size-3.5" />
-                      {mobileImageSizeLabel}
-                    </button>
-                    {isMobileSettingsOpen ? (
-                      <>
-                        <MobileSizeButton active={imageSize === "3:4"} onClick={() => onImageSizeChange("3:4")}>
-                          3:4
-                        </MobileSizeButton>
-                        <MobileSizeButton active={imageSize === "9:16"} onClick={() => onImageSizeChange("9:16")}>
-                          9:16
-                        </MobileSizeButton>
-                      </>
+                      <button
+                        type="button"
+                        onClick={onPickReferenceImage}
+                        className="nature-interactive inline-flex shrink-0 items-center gap-1 rounded-full border border-[#cad9b2] bg-[#fffdf4] px-2.5 py-1.5 text-xs font-semibold text-[#315f35]"
+                      >
+                        <ImagePlus className="size-3.5" />
+                        {referenceImages.length > 0 ? "加图" : "传图"}
+                      </button>
                     ) : null}
-                  </div>
+                    <div className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#cad9b2] bg-[#fffdf4] p-0.5 text-xs font-semibold text-[#315f35]">
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileSettingsOpen((open) => !open)}
+                        className={cn(
+                          "nature-interactive inline-flex h-7 items-center gap-1 rounded-full px-2",
+                          isMobileSettingsOpen && "bg-[#edf6dc]",
+                        )}
+                      >
+                        <SlidersHorizontal className="size-3.5" />
+                        {mobileImageSizeLabel}
+                      </button>
+                      {isMobileSettingsOpen ? (
+                        <>
+                          <MobileSizeButton active={imageSize === "3:4"} onClick={() => onImageSizeChange("3:4")}>
+                            3:4
+                          </MobileSizeButton>
+                          <MobileSizeButton active={imageSize === "9:16"} onClick={() => onImageSizeChange("9:16")}>
+                            9:16
+                          </MobileSizeButton>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </div>
 
+              {/* PC 端底部工具栏 */}
               <div className="hidden items-end justify-between gap-3 sm:flex">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-                  {isEditingImage ? (
+                  {canEdit ? (
                     <Button
                       type="button"
                       variant="outline"
                       className="h-10 rounded-full border-[#cad9b2] bg-[#fffdf4] px-4 text-sm font-medium text-[#315f35] shadow-none"
-                      onClick={handlePickReferenceImage}
+                      onClick={onPickReferenceImage}
                     >
                       <ImagePlus className="size-4" />
-                      {referenceImages.length > 0 ? "继续添加参考图" : "上传参考图"}
+                      {referenceImages.length > 0 ? "继续添加图片" : "上传图片"}
                     </Button>
                   ) : null}
-                  <div className="rounded-full bg-[#edf6dc] px-3 py-2 text-xs font-medium text-[#526642]">
-                    {quotaLabel} {availableQuota}
-                  </div>
-                  {costHint ? <div className="rounded-full bg-[#edf6dc] px-3 py-2 text-xs font-medium text-[#526642]">{costHint}</div> : null}
                   {activeTaskCount > 0 ? (
                     <div className="flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
                       <LoaderCircle className="size-3 animate-spin" />
                       {activeTaskCount} 个任务处理中
                     </div>
                   ) : null}
-                  <div className="flex items-center gap-2 rounded-full border border-[#cad9b2] bg-[#fffdf4] px-3 py-1">
-                    <span className="text-sm font-medium text-[#315f35]">张数</span>
-                    <Input
-                      type="number"
-                      min="1"
-                      max="10"
-                      step="1"
-                      value={imageCount}
-                      onChange={(event) => onImageCountChange(event.target.value)}
-                      className="h-8 w-[64px] border-0 bg-transparent px-0 text-center text-sm font-medium text-[#315f35] shadow-none focus-visible:ring-0"
-                    />
-                  </div>
                   <SizeSelector
                     imageSizeLabel={imageSizeLabel}
                     imageSize={imageSize}

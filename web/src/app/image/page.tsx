@@ -1287,11 +1287,7 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
           <ImageComposer
             mode={imageMode}
             prompt={imagePrompt}
-            imageCount={imageCount}
             imageSize={imageSize}
-            availableQuota={availableQuota}
-            quotaLabel={isCustomer ? "可用额度" : "剩余额度"}
-            costHint={isCustomer ? `预计消耗 ${estimatedCost} 额度` : ""}
             canEdit
             canSubmit={!hasKnownInsufficientBalance}
             submitDisabledReason={hasKnownInsufficientBalance ? "额度不足，请先兑换 CDK" : ""}
@@ -1301,7 +1297,6 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
             fileInputRef={fileInputRef}
             onModeChange={setImageMode}
             onPromptChange={setImagePrompt}
-            onImageCountChange={setImageCount}
             onImageSizeChange={setImageSize}
             onSubmit={handleSubmit}
             onPickReferenceImage={() => fileInputRef.current?.click()}
