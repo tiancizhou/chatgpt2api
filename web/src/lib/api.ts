@@ -227,6 +227,13 @@ export async function fetchUserBalance() {
   return httpRequest<{ credit_balance: number }>("/api/user/balance");
 }
 
+export async function logoutUser() {
+  return httpRequest<{ ok: boolean }>("/api/user/logout", {
+    method: "POST",
+    redirectOnUnauthorized: false,
+  });
+}
+
 export async function redeemCdk(code: string) {
   return httpRequest<{ credited: number; balance: number }>("/api/user/cdks/redeem", {
     method: "POST",

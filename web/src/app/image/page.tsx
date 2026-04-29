@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { History, LoaderCircle, Ticket } from "lucide-react";
+import { History, LoaderCircle, LogOut, Ticket } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
@@ -24,10 +24,12 @@ import {
   fetchUserBalance,
   generateImage,
   generateUserImage,
+  logoutUser,
   redeemCdk,
   type Account,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
+import { clearStoredAuthSession } from "@/store/auth";
 import {
   clearImageConversations,
   deleteImageConversation,
@@ -135,6 +137,7 @@ function ImageMobileHeader({
   isCustomer,
   onOpenHistory,
   onRedeem,
+  onLogout,
 }: {
   historyCount: number;
   activeTaskCount: number;
@@ -142,6 +145,7 @@ function ImageMobileHeader({
   isCustomer: boolean;
   onOpenHistory: () => void;
   onRedeem: () => void;
+  onLogout: () => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-2 lg:hidden">
@@ -161,18 +165,28 @@ function ImageMobileHeader({
       </button>
       <div className="flex min-w-0 shrink-0 items-center gap-2">
         {isCustomer ? (
-          <button
-            type="button"
-            className="nature-interactive inline-flex h-9 max-w-[58vw] shrink-0 items-center justify-center gap-1 rounded-full border border-[#cad9b2]/70 bg-[#fffdf4]/82 px-3 text-xs font-semibold text-[#315f35] shadow-sm"
-            onClick={onRedeem}
-          >
-            <span className="truncate">
-              额度 <span className="font-bold text-[#203d2b]">{availableQuota}</span>
-            </span>
-            <span className="text-[#cad9b2]">|</span>
-            <Ticket className="size-3.5 shrink-0" />
-            <span className="shrink-0">兑换</span>
-          </button>
+          <>
+            <button
+              type="button"
+              className="nature-interactive inline-flex h-9 max-w-[44vw] shrink-0 items-center justify-center gap-1 rounded-full border border-[#cad9b2]/70 bg-[#fffdf4]/82 px-3 text-xs font-semibold text-[#315f35] shadow-sm"
+              onClick={onRedeem}
+            >
+              <span className="truncate">
+                额度 <span className="font-bold text-[#203d2b]">{availableQuota}</span>
+              </span>
+              <span className="text-[#cad9b2]">|</span>
+              <Ticket className="size-3.5 shrink-0" />
+              <span className="shrink-0">兑换</span>
+            </button>
+            <button
+              type="button"
+              className="nature-interactive inline-flex h-9 shrink-0 items-center justify-center gap-1 rounded-full border border-[#cad9b2]/70 bg-[#fffdf4]/82 px-3 text-xs font-semibold text-[#315f35] shadow-sm"
+              onClick={onLogout}
+            >
+              <LogOut className="size-3.5 shrink-0" />
+              <span className="shrink-0">退出</span>
+            </button>
+          </>
         ) : null}
       </div>
     </div>
@@ -927,6 +941,18 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+    } catch {
+    } finally {
+      await clearStoredAuthSession();
+      if (typeof window !== "undefined") {
+        window.location.replace("/login");
+      }
+    }
+  };
+
   const handleUseExamplePrompt = (value: string) => {
     setImagePrompt(value);
     textareaRef.current?.focus();
@@ -1056,6 +1082,7 @@ function ImagePageContent({ isAdmin, isCustomer, ownerId }: { isAdmin: boolean; 
               isCustomer={isCustomer}
               onOpenHistory={() => setIsHistoryOpen(true)}
               onRedeem={() => setIsRedeemOpen(true)}
+              onLogout={() => void handleLogout()}
             />
           </div>
 
