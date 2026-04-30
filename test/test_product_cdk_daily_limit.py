@@ -90,6 +90,18 @@ class ProductCdkDailyLimitTests(unittest.TestCase):
         result = self.service.redeem_cdk(bob_id, second_code)
         self.assertEqual(result["balance"], 10)
 
+    def test_product_time_fields_include_utc_timezone_marker(self) -> None:
+        user_id = self._register_user("alice")
+        [code] = self._create_codes(1, 10)
+        self.service.redeem_cdk(user_id, code)
+
+        user = self.service.get_user(user_id)
+        cdk = self.service.list_cdks()[0]
+
+        self.assertTrue(str(user["created_at"]).endswith("+00:00"))
+        self.assertTrue(str(cdk["created_at"]).endswith("+00:00"))
+        self.assertTrue(str(cdk["redeemed_at"]).endswith("+00:00"))
+
     def test_daily_limit_uses_shanghai_calendar_day(self) -> None:
         user_id = self._register_user("alice")
         first_code, second_code = self._create_codes(2, 10)

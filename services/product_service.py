@@ -137,9 +137,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def _format_utc_time(value: datetime | None) -> str | None:
+    return _as_utc(value).isoformat() if value else None
+
+
 def _redeem_date_key(now: datetime) -> str:
-    utc_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
-    return utc_now.astimezone(SHANGHAI_TZ).date().isoformat()
+    return _as_utc(now).astimezone(SHANGHAI_TZ).date().isoformat()
 
 
 def _hash_value(value: str) -> str:
@@ -179,8 +186,8 @@ def _public_user(row: Any) -> dict[str, object]:
         "username": row.username,
         "credit_balance": int(row.credit_balance or 0),
         "enabled": bool(row.enabled),
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "last_login_at": row.last_login_at.isoformat() if row.last_login_at else None,
+        "created_at": _format_utc_time(row.created_at),
+        "last_login_at": _format_utc_time(row.last_login_at),
     }
 
 
@@ -234,9 +241,9 @@ def _public_image_job(row: Any, include_result: bool = True) -> dict[str, object
         "result": _deserialize_json(getattr(row, "result_payload", "")) if include_result else None,
         "result_urls": result_urls if isinstance(result_urls, list) else [],
         "error_message": row.error_message or "",
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if getattr(row, "updated_at", None) else None,
-        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "created_at": _format_utc_time(row.created_at),
+        "updated_at": _format_utc_time(getattr(row, "updated_at", None)),
+        "completed_at": _format_utc_time(row.completed_at),
     }
 
 
@@ -454,10 +461,10 @@ class ProductService:
                 "credit_amount": mapping[cdks.c.credit_amount],
                 "status": mapping[cdks.c.status],
                 "created_by": mapping[cdks.c.created_by],
-                "created_at": mapping[cdks.c.created_at].isoformat() if mapping[cdks.c.created_at] else None,
+                "created_at": _format_utc_time(mapping[cdks.c.created_at]),
                 "redeemed_by_user_id": mapping[cdks.c.redeemed_by_user_id],
                 "redeemed_by_username": mapping["redeemed_by_username"],
-                "redeemed_at": mapping[cdks.c.redeemed_at].isoformat() if mapping[cdks.c.redeemed_at] else None,
+                "redeemed_at": _format_utc_time(mapping[cdks.c.redeemed_at]),
             })
         return result
 
