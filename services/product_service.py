@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import base64
 import hashlib
 import hmac
@@ -21,6 +22,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     and_,
     create_engine,
     delete,
@@ -37,6 +39,7 @@ USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.@-]{3,32}$")
 PASSWORD_ITERATIONS = 210_000
 SESSION_TTL_DAYS = 30
 IMAGE_CREDIT_COST = 2
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
 class ProductServiceError(Exception):
@@ -99,6 +102,17 @@ credit_ledger = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+cdk_daily_redemptions = Table(
+    "cdk_daily_redemptions",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("user_id", String(36), ForeignKey("product_users.id"), nullable=False, index=True),
+    Column("redeem_date", String(10), nullable=False),
+    Column("cdk_id", String(36), ForeignKey("cdks.id"), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("user_id", "redeem_date", name="uq_cdk_daily_redemptions_user_date"),
+)
+
 image_generation_jobs = Table(
     "image_generation_jobs",
     metadata,
@@ -121,6 +135,11 @@ image_generation_jobs = Table(
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _redeem_date_key(now: datetime) -> str:
+    utc_now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
+    return utc_now.astimezone(SHANGHAI_TZ).date().isoformat()
 
 
 def _hash_value(value: str) -> str:
@@ -468,6 +487,16 @@ class ProductService:
             user = connection.execute(select(product_users).where(product_users.c.id == user_id)).first()
             if user is None or not bool(user.enabled):
                 raise ProductServiceError("用户不存在或已禁用", 404)
+            try:
+                connection.execute(insert(cdk_daily_redemptions).values(
+                    id=str(uuid4()),
+                    user_id=user_id,
+                    redeem_date=_redeem_date_key(now),
+                    cdk_id=cdk.id,
+                    created_at=now,
+                ))
+            except IntegrityError as exc:
+                raise ProductServiceError("每天只能兑换 1 次 CDK", 409) from exc
             updated = connection.execute(
                 update(cdks)
                 .where(and_(cdks.c.id == cdk.id, cdks.c.status == "unused"))
