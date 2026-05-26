@@ -441,7 +441,6 @@ class PlatformRegistrar:
     def _platform_authorize(self, email: str, index: int) -> None:
         step(index, "开始 platform authorize")
         self.session.cookies.set("oai-did", self.device_id, domain=".auth.openai.com")
-        self.session.cookies.set("oai-did", self.device_id, domain="auth.openai.com")
         _, code_challenge = _generate_pkce()
         params = {
             "issuer": auth_base,
@@ -482,12 +481,26 @@ class PlatformRegistrar:
             raise RuntimeError(error or f"send_otp_http_{getattr(resp, 'status_code', 'unknown')}")
         step(index, "发送验证码完成")
 
-    def _validate_otp(self, code: str, index: int) -> None:
+    def _validate_otp(self, code: str, index: int) -> str:
         step(index, f"开始校验验证码 {code}")
         resp, error = validate_otp(self.session, self.device_id, code)
         if resp is None or resp.status_code != 200:
             raise RuntimeError(error or f"validate_otp_http_{getattr(resp, 'status_code', 'unknown')}")
+        payload = _response_json(resp)
         step(index, "验证码校验完成")
+        return str(payload.get("continue_url") or "").strip()
+
+    def _navigate_to_about_you(self, continue_url: str, index: int) -> None:
+        url = continue_url or f"{auth_base}/about-you"
+        if url.startswith("/"):
+            url = f"{auth_base}{url}"
+        step(index, "导航至账号资料页面")
+        request_with_local_retry(
+            self.session, "get", url,
+            headers=self._navigate_headers(f"{auth_base}/email-verification"),
+            allow_redirects=True,
+            verify=False,
+        )
 
     def _create_account(self, name: str, birthdate: str, index: int) -> None:
         step(index, "开始创建账号资料")
@@ -495,7 +508,14 @@ class PlatformRegistrar:
         headers["openai-sentinel-token"] = build_sentinel_token(self.session, self.device_id, "oauth_create_account")
         resp, error = request_with_local_retry(self.session, "post", f"{auth_base}/api/accounts/create_account", json={"name": name, "birthdate": birthdate}, headers=headers, verify=False)
         if resp is None or resp.status_code not in (200, 302):
-            raise RuntimeError(error or f"create_account_http_{getattr(resp, 'status_code', 'unknown')}")
+            body = ""
+            try:
+                err = (_response_json(resp).get("error") or {}) if resp is not None else {}
+                code = err.get("code") or ""
+                body = f" [{code}]" if code else ""
+            except Exception:
+                pass
+            raise RuntimeError(error or f"create_account_http_{getattr(resp, 'status_code', 'unknown')}{body}")
         step(index, "创建账号资料完成")
 
     def _login_and_exchange_tokens(self, email: str, password: str, mailbox: dict, index: int) -> dict:
@@ -568,7 +588,8 @@ class PlatformRegistrar:
         if not code:
             raise RuntimeError("等待注册验证码超时")
         step(index, f"收到注册验证码: {code}")
-        self._validate_otp(code, index)
+        continue_url = self._validate_otp(code, index)
+        self._navigate_to_about_you(continue_url, index)
         self._create_account(f"{first_name} {last_name}", _random_birthdate(), index)
         tokens = self._login_and_exchange_tokens(email, password, mailbox, index)
         return {

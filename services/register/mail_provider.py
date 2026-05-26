@@ -361,6 +361,74 @@ class GptMailProvider(BaseMailProvider):
         self.session.close()
 
 
+class SkymailProvider(BaseMailProvider):
+    name = "skymail"
+
+    def __init__(self, entry: dict, conf: dict):
+        super().__init__(conf, str(entry.get("provider_ref") or ""))
+        self.api_base = str(entry["api_base"]).rstrip("/")
+        self.admin_email = str(entry["admin_email"]).strip()
+        self.admin_password = str(entry["admin_password"]).strip()
+        self.domain = entry.get("domain") or []
+        self.session = requests.Session()
+        self.session.trust_env = False
+        self.session.headers.update({"User-Agent": conf["user_agent"], "Accept": "application/json", "Content-Type": "application/json"})
+
+    def _request(self, method: str, path: str, token: str = "", payload: dict | None = None):
+        headers = {"Authorization": token} if token else {}
+        resp = self.session.request(method.upper(), f"{self.api_base}{path}", headers=headers, json=payload, timeout=self.conf["request_timeout"], verify=False)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Skymail 请求失败: {method} {path}, HTTP {resp.status_code}, body={resp.text[:300]}")
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"Skymail {method} {path} 返回结构不是对象")
+        if data.get("code") != 200:
+            raise RuntimeError(f"Skymail 请求失败: {method} {path}, code={data.get('code')}, message={data.get('message')}")
+        return data.get("data")
+
+    def _token(self) -> str:
+        data = self._request("POST", "/api/public/genToken", payload={"email": self.admin_email, "password": self.admin_password})
+        token = str((data or {}).get("token") or "").strip() if isinstance(data, dict) else ""
+        if not token:
+            raise RuntimeError("Skymail 缺少 token")
+        return token
+
+    def create_mailbox(self, username: str | None = None) -> dict[str, Any]:
+        domain = _next_domain(self.domain)
+        token = self._token()
+        address = f"{username or _random_mailbox_name()}@{domain}"
+        password = "".join(random.choices(string.ascii_letters + string.digits, k=12))
+        self._request("POST", "/api/public/addUser", token=token, payload={"list": [{"email": address, "password": password}]})
+        return {"provider": self.name, "provider_ref": self.provider_ref, "address": address, "token": token, "password": password}
+
+    def fetch_latest_message(self, mailbox: dict[str, Any]) -> dict[str, Any] | None:
+        data = self._request(
+            "POST",
+            "/api/public/emailList",
+            token=str(mailbox.get("token") or ""),
+            payload={"toEmail": mailbox["address"], "timeSort": "desc", "type": 0, "isDel": 0, "num": 1, "size": 10},
+        )
+        items = data if isinstance(data, list) else []
+        messages = [item for item in items if isinstance(item, dict) and _message_matches_email(item, str(mailbox.get("address") or ""))]
+        if not messages:
+            return None
+        item = messages[0]
+        return {
+            "provider": self.name,
+            "mailbox": mailbox["address"],
+            "message_id": str(item.get("emailId") or ""),
+            "subject": str(item.get("subject") or ""),
+            "sender": str(item.get("sendEmail") or item.get("sendName") or ""),
+            "text_content": str(item.get("text") or ""),
+            "html_content": str(item.get("content") or ""),
+            "received_at": _parse_received_at(item.get("createTime")),
+            "raw": item,
+        }
+
+    def close(self) -> None:
+        self.session.close()
+
+
 def _entries(mail_config: dict) -> list[dict]:
     return [{**item, "provider_ref": f"{item['type']}#{index + 1}"} for index, item in enumerate(mail_config["providers"])]
 
@@ -395,6 +463,8 @@ def _create_provider(mail_config: dict, provider: str = "", provider_ref: str = 
         return DuckMailProvider(entry, conf)
     if entry["type"] == "gptmail":
         return GptMailProvider(entry, conf)
+    if entry["type"] == "skymail":
+        return SkymailProvider(entry, conf)
     raise RuntimeError(f"不支持的 mail.provider: {entry['type']}")
 
 
